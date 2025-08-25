@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
+import dayjs from "dayjs";
 import { useAlert } from '../context/AlertContext';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     Box,
     Button,
@@ -14,14 +15,21 @@ import {
     InputLabel,
     ListItem,
     ListItemIcon,
-    ListItemText
+    ListItemText,
+    LinearProgress
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import { type Forklift, getForklifts } from '../api/forklift';
+import {
+    type Forklift,
+    type ForkliftCommand,
+    getForklifts,
+    submitForkliftCommand,
+    getForkliftCommands
+} from '../api/forklift';
 
 type SimulationHistory = {
     timestamp: Date;
@@ -38,8 +46,9 @@ type ActionItem = {
 export default function CommandSimulation() {
     const [selectedForkliftModel, setSelectedForkliftModel] = useState<string>('');
     const [command, setCommand] = useState<string>("");
-    const [actionsHistory, setActionsHistory] = useState<SimulationHistory[]>([]);
+    //const [actionsHistory, setActionsHistory] = useState<SimulationHistory[]>([]);
     const { showError, showSuccess } = useAlert();
+    const queryClient = useQueryClient();
 
     // Fetch forklifts list
     const { data: forklifts, isLoading } = useQuery<Forklift[], Error>({
@@ -47,6 +56,24 @@ export default function CommandSimulation() {
         queryFn: getForklifts,
         retry: 1, // Optional: retry once on failure
         staleTime: 1000 * 60 * 5 // Optional: cache for 5 minutes
+    });
+
+    // Fetch forklift commands history based on selected forklift model
+    const { data: forkliftCommands, isLoading: isCommandLoading } = useQuery<ForkliftCommand[], Error>({
+        queryKey: ['forkliftCommands', selectedForkliftModel],
+        queryFn: () => getForkliftCommands(selectedForkliftModel),
+        enabled: !!selectedForkliftModel,
+    });
+
+    const mutation = useMutation({
+        mutationFn: submitForkliftCommand,
+        onSuccess: () => {
+            showSuccess('Forklift command submitted successfully.');
+            queryClient.invalidateQueries({ queryKey: ['forkliftCommands', selectedForkliftModel] });
+        },
+        onError: (error: Error) => {
+            showError(`Failed to submit forklift command: ${error.message}`);
+        }
     });
 
     const parseCommand = (cmd: string): ActionItem[] => {
@@ -132,21 +159,48 @@ export default function CommandSimulation() {
         }
 
         // Find forklift object based on selected model
-        const forklift = forklifts?.find(f => f.modelNumber === selectedForkliftModel) || null;
+        //const forklift = forklifts?.find(f => f.modelNumber === selectedForkliftModel) || null;
         const newActions = parseCommand(command);
 
         if (newActions && newActions.length > 0) {
-            const newEntry: SimulationHistory = {
-                timestamp: new Date(),
-                forklift: forklift,
+            // const newEntry: SimulationHistory = {
+            //     timestamp: new Date(),
+            //     forklift: forklift,
+            //     command,
+            //     actions: newActions
+            // };
+
+            //Submit to DB
+            const newAction: ForkliftCommand = {
+                modelNumber: selectedForkliftModel,
                 command,
-                actions: newActions
+                actionDate: new Date().toISOString()
             };
 
-            setActionsHistory(prevHistory => [newEntry, ...prevHistory]);
+            mutation.mutate(newAction);
+
+            ///setActionsHistory(prevHistory => [newEntry, ...prevHistory]);
             showSuccess('Send operate commands to Forklift.');
         }
     };
+
+    const forkliftCommandsByModel: SimulationHistory[] = Array.isArray(forkliftCommands)
+        ? forkliftCommands.map((cmd: ForkliftCommand) => {
+            const actions = parseCommand(cmd.command);
+            const history: SimulationHistory = {
+                timestamp: cmd.actionDate ? new Date(cmd.actionDate) : new Date(),
+                forklift: forklifts?.find(f => f.modelNumber === cmd.modelNumber) || null,
+                command: cmd.command,
+                actions: actions
+            };
+
+            return history;
+        })
+        : [];
+
+    const formatDate = (date: Date): string => {
+        return dayjs(date).format('YYYY-MM-DD HH:mm:ss');
+    }
 
     return (
         <Box display="flex" flexDirection="column" gap={3}>
@@ -206,18 +260,25 @@ export default function CommandSimulation() {
                     </Button>
                 </Box>
             </Paper>
-            {actionsHistory.length > 0 && (
+            {isCommandLoading && (
+                <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" gutterBottom fontWeight={700}>
+                        Simulation History Loading!!!
+                    </Typography>
+                </Paper>
+            )}
+            {!isCommandLoading && forkliftCommandsByModel.length > 0 && (
                 <Paper sx={{ p: 3 }}>
                     <Typography variant="h6" gutterBottom fontWeight={700}>
                         Simulation History
                     </Typography>
-                    {actionsHistory.map((entry, historyIndex) => (
+                    {forkliftCommandsByModel.map((entry, historyIndex) => (
                         <Box key={historyIndex} mb={3}>
                             <Typography variant="subtitle1" fontWeight={600}>
                                 {`Forklift: ${entry.forklift?.name} (${entry.forklift?.modelNumber})`}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
-                                {`Command: "${entry.command}" - ${entry.timestamp.toLocaleString()}`}
+                                {`Command: "${entry.command}" - ${formatDate(entry.timestamp)}`}
                             </Typography>
                             <List dense>
                                 {entry.actions.map((action, actionIndex) => (

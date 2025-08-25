@@ -6,6 +6,12 @@ export interface Forklift {
     manufacturingDate: string;
 }
 
+export interface ForkliftCommand { 
+    modelNumber: string;
+    command: string;
+    actionDate: string;
+}
+
 // For testing
 // const mockForklifts: Forklift[] = [
 //     {
@@ -57,5 +63,37 @@ export const uploadForklifts = async (forklifts: Forklift[]): Promise<void> => {
             throw error;
         }
         throw new Error('Failed to upload forklift data.');
+    }
+};
+
+export const submitForkliftCommand = async (forkliftCommand: ForkliftCommand): Promise<boolean> => {
+    try {
+        const response = await api.post('/forklifts/command', forkliftCommand);
+        return response.status === 200;
+    }
+    catch (error: unknown) {
+        if (isAxiosError(error)) {
+            throw new Error(error.response.data.message);
+        }
+        else if (error instanceof Error) {
+            throw error;
+        }
+        throw new Error('Failed to submit forklift command.');
+    }
+}
+
+export const getForkliftCommands = async (modelNumber: string): Promise<ForkliftCommand[]> => {
+    try {
+        const response = await api.get(`/forklifts/commands/${modelNumber}`);
+        return response.data;
+    }
+    catch (error: unknown) {
+        if (isAxiosError(error)) {
+            throw new Error(error.response.data.message);
+        }
+        else if (error instanceof Error) {
+            throw error;
+        }
+        throw new Error('Failed to fetch forklift commands.');
     }
 };
